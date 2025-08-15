@@ -19,3 +19,4 @@ yarn-error.log*
 *.swp
 
 claimcheck-pro/
+node_modules

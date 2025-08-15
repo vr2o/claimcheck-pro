@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "postgresql"     // Hardcoded; Prisma does not allow env() here
   url      = env("DATABASE_URL")
 }
 
@@ -30,9 +30,9 @@ model EvidenceSource {
   url              String
   title            String?
   language         String?
-  domain           String?
-  sourceType       String?
-  discoveredVia    String?
+  domain           String
+  sourceType       String
+  discoveredVia    String
   snippet          String
   publishDate      DateTime?
   credibilityScore Float

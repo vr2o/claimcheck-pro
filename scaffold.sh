@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 set -euo pipefail
 
 ROOT_DIR="${PWD}"
@@ -319,7 +318,6 @@ export default function HomePage() {
     </main>
   );
 }
-TSX
 
 # --- app/analysis/[id]/page.tsx ---
 cat > app/analysis/[id]/page.tsx <<'TSX'
@@ -349,7 +347,6 @@ export default async function AnalysisPage({ params }: { params: { id: string }}
     </main>
   );
 }
-TSX
 
 # --- app/pricing/page.tsx ---
 cat > app/pricing/page.tsx <<'TSX'
@@ -370,7 +367,6 @@ export default function Pricing() {
     </main>
   );
 }
-TSX
 
 # --- app/setup/page.tsx ---
 cat > app/setup/page.tsx <<'TSX'
@@ -386,7 +382,6 @@ export default function Setup() {
     </main>
   );
 }
-TSX
 
 # --- app/api/analyze/route.ts ---
 cat > app/api/analyze/route.ts <<'TS'
@@ -525,7 +520,6 @@ export default function LanguageSelector({ value, onChange }:{ value:string; onC
     </select>
   );
 }
-TSX
 
 # --- components/ProgressSteps.tsx ---
 cat > components/ProgressSteps.tsx <<'TSX'
@@ -543,7 +537,6 @@ export default function ProgressSteps({ stage, message }:{ stage:string; message
     </div>
   );
 }
-TSX
 
 # --- components/UpgradeModal.tsx ---
 cat > components/UpgradeModal.tsx <<'TSX'
@@ -563,7 +556,6 @@ export default function UpgradeModal({ open, onClose }:{ open:boolean; onClose:(
     </div>
   );
 }
-TSX
 
 # --- lib/i18n/index.ts ---
 cat > lib/i18n/index.ts <<'TS'

@@ -931,5 +931,3 @@ pnpm dev
 # second terminal:
 pnpm build:workers
 pnpm start:worker
-```
-MD

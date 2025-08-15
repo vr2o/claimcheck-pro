@@ -1,0 +1,24 @@
+'use client';
+import Link from 'next/link';
+
+export default function Header() {
+  return (
+    <header className="w-full">
+      <div className="mx-auto max-w-3xl px-4 pt-14 pb-8 sm:pt-20 sm:pb-10 text-center">
+        <Link href="/" className="inline-flex items-center gap-2 group" aria-label="QikVerify Home">
+          <span
+            className="text-5xl sm:text-6xl font-extrabold tracking-tight
+                       bg-gradient-to-r from-indigo-500 via-sky-500 to-emerald-500
+                       bg-clip-text text-transparent"
+          >
+            QikVerify
+          </span>
+        </Link>
+        <p className="mt-3 sm:mt-4 text-slate-600 text-base sm:text-lg leading-relaxed">
+          Verify claims in any language. Simple, clear, and transparent.
+        </p>
+      </div>
+    </header>
+  );
+}
+TSX

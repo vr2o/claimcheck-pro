@@ -1,94 +1,215 @@
-import { NextRequest } from 'next/server';
-import { z } from 'zod';
-import { PrismaClient } from '@prisma/client';
-import { Queue } from 'bullmq';
-import { getRedis, getRedisPubSub } from '@/workers/queue';
-import { ttlForTimeRange } from '@/lib/cache';
-import { getClientIp, monthKey, secondsUntilMonthEnd } from '@/lib/utils';
+import { NextRequest, NextResponse } from 'next/server';
+// ...existing code...
+// GET handler: return user-friendly analysis JSON by id
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = req.nextUrl;
+    const id = searchParams.get('id');
+    if (!id) return jsonErr(400, 'Missing id');
 
-const prisma = new PrismaClient();
+    // Fetch analysis and sources
+    const a = await prisma.analysis.findUnique({
+      where: { id },
+      include: { sources: true },
+    });
+    if (!a) return jsonErr(404, 'Not found');
 
-const BodySchema = z.object({
-  input: z.string().min(3),
-  depth: z.enum(['quick','thorough']).optional(),
-  includeCounterEvidence: z.boolean().optional(),
-  timeRange: z.enum(['7d','30d','1y','all']).optional(),
-  uiLang: z.string().optional(),
-  mode: z.enum(['auto','text','image','video']).optional()
-});
+    // Defensive: fallback if no sources
+    const sourcesWithScores = (a.sources || []).map(s => ({
+      url: s.url,
+      title: s.title ?? '',
+      language: s.language ?? '',
+      domain: s.domain ?? '',
+      sourceType: s.sourceType ?? '',
+      discoveredVia: s.discoveredVia ?? '',
+      snippet: s.snippet ?? '',
+      publishDate: s.publishDate ? s.publishDate.toISOString() : '',
+      credibilityScore: s.credibilityScore ?? 0,
+      directnessScore: s.directnessScore ?? 0,
+      methodologyScore: s.methodologyScore ?? 0,
+      bias: s.bias ?? '',
+      stance: s.stance ?? '',
+      qualityScore: s.qualityScore ?? 0,
+    }));
 
-function hasAnyProvider() {
-  const providers = (process.env.SEARCH_PROVIDERS || '').split(',').map(s => s.trim()).filter(Boolean);
-  const anyKey =
-    !!process.env.TAVILY_API_KEY ||
-    !!process.env.SERPER_API_KEY ||
-    !!process.env.SEMANTIC_SCHOLAR_API_KEY ||
-    !!process.env.NEWS_API_KEY;
-  return providers.length > 0 && anyKey;
+    // Compose user-friendly veracity analysis JSON (same logic as POST)
+    let veracity_score = 50;
+    if (a.qualityScore > 75) veracity_score = 90;
+    else if (a.qualityScore > 60) veracity_score = 75;
+    else if (a.qualityScore > 50) veracity_score = 60;
+    else if (a.qualityScore > 25) veracity_score = 40;
+    else if (a.qualityScore > 0) veracity_score = 20;
+    else veracity_score = 0;
+
+    let summary_statement = "This claim could not be verified.";
+    if (veracity_score >= 75) summary_statement = "This claim appears to be true based on available evidence.";
+    else if (veracity_score >= 60) summary_statement = "This claim appears to be mostly true, but some details may be unverified.";
+    else if (veracity_score >= 40) summary_statement = "This claim has some support, but there are doubts or missing evidence.";
+    else if (veracity_score >= 20) summary_statement = "This claim appears to be mostly false or lacks credible support.";
+    else summary_statement = "This claim appears to be false or is not supported by evidence.";
+
+    const supporting_evidence = sourcesWithScores
+      .filter(s => s.stance === 'supporting')
+      .map(s => s.snippet || s.title || s.url)
+      .slice(0, 3);
+    const contradictory_evidence = sourcesWithScores
+      .filter(s => s.stance === 'challenging')
+      .map(s => s.snippet || s.title || s.url)
+      .slice(0, 3);
+
+    const context_and_nuance = "This analysis is based on available public sources. Some claims may be difficult to verify due to lack of coverage or conflicting reports. Always consider the context and check multiple sources.";
+
+    const sources_checked = sourcesWithScores.slice(0, 5).map(s => ({
+      name: s.domain || 'Unknown',
+      link: s.url,
+      assessment: s.snippet || s.title || '',
+    }));
+
+    return NextResponse.json({
+      veracity_score,
+      summary_statement,
+      scale_labels: {
+        left: "More likely False",
+        right: "More likely True"
+      },
+      detailed_analysis: {
+        supporting_evidence,
+        contradictory_evidence,
+        context_and_nuance,
+        sources_checked
+      }
+    }, { status: 200 });
+  } catch (e: any) {
+    return jsonErr(500, e?.message ?? 'Internal error');
+  }
 }
 
-function freeTierLimitKey(ip: string) {
-  return `free:${monthKey()}:${ip}`;
-}
+export const runtime = 'nodejs';
 
-async function checkAndIncQuota(ip: string) {
-  const redis = await getRedis();
-  const limit = Number(process.env.FREE_TIER_LIMIT || '10');
-  const key = freeTierLimitKey(ip);
-  const used = Number((await redis.get(key)) || '0');
-  if (used >= limit) return false;
-  const ttl = secondsUntilMonthEnd();
-  await redis.multi().incr(key).expire(key, ttl).exec();
-  return true;
+// ...existing code...
+import { prisma } from '@/lib/db';
+import { extractContent } from '@/lib/extract';
+import { detectLanguage } from '@/lib/lang';
+import { searchAcrossProviders } from '@/lib/search';
+import { scoreAll } from '@/lib/scoring';
+
+function jsonErr(status: number, message: string, extra?: any) {
+  return NextResponse.json({ error: message, ...(extra ?? {}) }, { status });
 }
 
 export async function POST(req: NextRequest) {
-  if (!hasAnyProvider()) {
-    return new Response(JSON.stringify({ error: 'Missing search providers. Configure at least one provider key.', setupPath: '/setup' }), { status: 412, headers: { 'Content-Type': 'application/json' }});
-  }
-  let body;
-  try { body = BodySchema.parse(await req.json()); } catch { return new Response(JSON.stringify({ error: 'Invalid request'}), { status: 400 }); }
+  try {
+    const body = await req.json().catch(() => ({}));
+    const input = (body?.input || '').toString().trim();
+    const uiLang = (body?.uiLang || 'en').toString().trim() || 'en';
+    const mode = (body?.mode || 'auto').toString().trim();
 
-  const ip = getClientIp(req) || '0.0.0.0';
-  const isPaid = req.headers.get('x-paid-tier') === (process.env.PAID_TIER_SECRET || 'change_me');
-  if (!isPaid) {
-    const ok = await checkAndIncQuota(ip);
-    if (!ok) return new Response(JSON.stringify({ code: 'FREE_TIER_EXCEEDED' }), { status: 429 });
-  }
+    if (!input) return jsonErr(400, 'Missing input');
 
-  const analysis = await prisma.analysis.create({
-    data: { originalInput: body.input, claimText: '', claimLanguage: '', status: 'queued', isPublic: true }
-  });
+    // Create DB row early so we have an id/share URL even if extraction fails
+    const analysis = await prisma.analysis.create({
+      data: {
+        originalInput: input,
+        claimText: '',           // will fill later
+        claimLanguage: 'und',    // will fill later
+        status: 'queued',
+      },
+      select: { id: true },
+    });
 
-  const queue = new Queue('analysis', { connection: await getRedis() as any });
-  await queue.add('analyze', { analysisId: analysis.id, options: { ...body, isPaid, cacheTTL: ttlForTimeRange(body.timeRange || '30d') } }, { removeOnComplete: true, removeOnFail: true });
 
-  const sseUrl = `/api/analyze?stream=${analysis.id}`;
-  return new Response(JSON.stringify({ id: analysis.id, sseUrl }), { status: 200 });
-}
-
-export async function GET(req: NextRequest) {
-  const id = req.nextUrl.searchParams.get('stream');
-  if (!id) return new Response('Missing stream id', { status: 400 });
-  const { sub } = await getRedisPubSub();
-  await sub.subscribe(`analysis:${id}`);
-
-  const stream = new ReadableStream({
-    start(controller) {
-      function send(ev: string, data: unknown) {
-        controller.enqueue(new TextEncoder().encode(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`));
-      }
-      (sub as any).on('message', (channel: string, payload: string) => {
-        if (channel !== `analysis:${id}`) return;
-        try {
-          const msg = JSON.parse(payload);
-          if (msg.type === 'progress') send('progress', msg.data);
-          if (msg.type === 'complete') { send('complete', { ok: true }); controller.close(); }
-          if (msg.type === 'error') { send('error', { error: msg.error || 'unknown' }); controller.close(); }
-        } catch { send('error', { error: 'invalid message' }); controller.close(); }
-      });
+    // Extraction (wrapped, never throws)
+    let extracted: { title?: string; text?: string; notes?: string[] } = { notes: [] };
+    try {
+      extracted = await extractContent(input, { mode });
+    } catch (e: any) {
+      extracted = { text: '', notes: [`extract-failed: ${e?.message ?? 'unknown'}`] };
     }
-  });
+    console.log('[analyze] Extracted:', extracted);
 
-  return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', 'Connection': 'keep-alive' }});
+    // Language detection (fallback to UI lang)
+    const lang = detectLanguage(extracted.text || input) || uiLang || 'en';
+
+    // Choose claim text: prefer extracted text, else raw input
+    const claim = (extracted.text || input).slice(0, 2000); // cap
+
+    // Search across providers using the claim text (never throws)
+    const searchRes = await searchAcrossProviders({
+      query: claim,
+      lang,
+      includeCounterEvidence: body?.includeCounterEvidence ?? true,
+      timeRange: body?.timeRange ?? '30d',
+    }).catch((e: any) => ({
+      results: [],
+      providersTried: [],
+      succeeded: [],
+      failed: [{ name: 'all', reason: e?.message ?? 'search failed' }],
+      notes: ['search-failed'],
+    }));
+    console.log('[analyze] Search results:', searchRes);
+
+    // Score evidence (defensive)
+    const scored = scoreAll({
+      claim,
+      language: lang,
+      sources: searchRes.results || [],
+      isPaid: false, // or set according to your logic
+    });
+    console.log('[analyze] Scoring output:', scored);
+
+    // Compose user-friendly veracity analysis JSON
+    let veracity_score = 50;
+    if (scored.eqs > 75) veracity_score = 90;
+    else if (scored.eqs > 60) veracity_score = 75;
+    else if (scored.eqs > 50) veracity_score = 60;
+    else if (scored.eqs > 25) veracity_score = 40;
+    else if (scored.eqs > 0) veracity_score = 20;
+    else veracity_score = 0;
+
+    let summary_statement = "This claim could not be verified.";
+    if (veracity_score >= 75) summary_statement = "This claim appears to be true based on available evidence.";
+    else if (veracity_score >= 60) summary_statement = "This claim appears to be mostly true, but some details may be unverified.";
+    else if (veracity_score >= 40) summary_statement = "This claim has some support, but there are doubts or missing evidence.";
+    else if (veracity_score >= 20) summary_statement = "This claim appears to be mostly false or lacks credible support.";
+    else summary_statement = "This claim appears to be false or is not supported by evidence.";
+
+    const supporting_evidence = scored.sourcesWithScores
+      .filter(s => s.stance === 'supporting')
+      .map(s => s.snippet || s.title || s.url)
+      .slice(0, 3);
+    const contradictory_evidence = scored.sourcesWithScores
+      .filter(s => s.stance === 'challenging')
+      .map(s => s.snippet || s.title || s.url)
+      .slice(0, 3);
+
+    const context_and_nuance = "This analysis is based on available public sources. Some claims may be difficult to verify due to lack of coverage or conflicting reports. Always consider the context and check multiple sources.";
+
+    const sources_checked = scored.sourcesWithScores.slice(0, 5).map(s => ({
+      name: s.domain || 'Unknown',
+      link: s.url,
+      assessment: s.snippet || s.title || '',
+    }));
+
+    // Always return the analysis id for routing
+    return NextResponse.json({
+      id: analysis.id,
+      veracity_score,
+      summary_statement,
+      scale_labels: {
+        left: "More likely False",
+        right: "More likely True"
+      },
+      detailed_analysis: {
+        supporting_evidence,
+        contradictory_evidence,
+        context_and_nuance,
+        sources_checked
+      }
+    }, { status: 200 });
+
+  } catch (e: any) {
+    // Last-resort catch: send JSON instead of HTML
+    console.error('[analyze] fatal', e);
+    return jsonErr(500, e?.message ?? 'Internal error');
+  }
 }
