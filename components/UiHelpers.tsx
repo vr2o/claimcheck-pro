@@ -16,3 +16,11 @@ export function HelpTooltip() {
     </span>
   );
 }
+
+// Minimal client-side analysis poller (exported here to avoid creating a new file)
+export function AnalysisClientPlaceholder() {
+  // This placeholder is intentionally empty; the real client component is loaded on the page via a dynamic import in the page file.
+  return (
+    <div id="analysis-client-root" />
+  );
+}

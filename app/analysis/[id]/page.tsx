@@ -1,5 +1,6 @@
 
 import { ResultTypeIcon } from '@/components/ResultHelpers';
+import { AnalysisClientPlaceholder } from '@/components/UiHelpers';
 
 
 function getScoreColor(score: number) {
@@ -123,18 +124,55 @@ export default async function AnalysisPage({ params }: { params: { id?: string }
           <h2 className="font-semibold text-xl">Sources Checked</h2>
         </div>
         <div className="bg-gray-50 border border-gray-200 rounded-2xl p-5">
-          {data.detailed_analysis.sources_checked.length > 0 ? (
-            <ul className="space-y-3">
-              {data.detailed_analysis.sources_checked.map((src: any, i: number) => (
-                <li key={i} className="text-gray-900 text-lg">
-                  <a href={src.link} target="_blank" rel="noopener noreferrer" className="underline font-medium text-indigo-700 text-lg">{src.name}</a>
-                  {src.assessment && <span className="ml-2 text-gray-600 text-base">{src.assessment}</span>}
-                </li>
-              ))}
-            </ul>
-          ) : <div className="text-gray-500">No sources found.</div>}
+          <div id="analysis-client-root">
+            {data.detailed_analysis.sources_checked.length > 0 ? (
+              <ul className="space-y-3">
+                {data.detailed_analysis.sources_checked.map((src: any, i: number) => (
+                  <li key={i} className="text-gray-900 text-lg">
+                    <a href={src.link} target="_blank" rel="noopener noreferrer" className="underline font-medium text-indigo-700 text-lg">{src.name}</a>
+                    {src.assessment && <span className="ml-2 text-gray-600 text-base">{src.assessment}</span>}
+                  </li>
+                ))}
+              </ul>
+            ) : <div className="text-gray-500">No sources found.</div>}
+          </div>
         </div>
       </section>
+      {/* Client-side poller: hydrate and poll API for updates when worker finishes */}
+      <script dangerouslySetInnerHTML={{ __html: `
+        (function(){
+          const id = ${JSON.stringify((params?.id) || null)};
+          if(!id) return;
+          const root = document.getElementById('analysis-client-root');
+          let interval = null;
+          async function fetchOnce(){
+            try{
+              const res = await fetch('/api/analyze?id='+encodeURIComponent(id));
+              if(!res.ok) return;
+              const json = await res.json();
+              // replace root content with fresh HTML
+              const buildList = (arr)=> arr && arr.length ? '<ul class="space-y-3">'+arr.map((ev)=>'<li class="text-gray-900 text-lg">'+escapeHtml(ev)+'</li>').join('')+'</ul>' : '<div class="text-gray-500">No entries.</div>';
+              const sources = json?.detailed_analysis?.sources_checked || [];
+              const sourcesHtml = sources.length ? '<ul class="space-y-3">'+sources.map(s=>'<li class="text-gray-900 text-lg"><a class="underline font-medium text-indigo-700 text-lg" href="'+escapeAttr(s.link)+'" target="_blank">'+escapeHtml(s.name)+'</a>'+(s.assessment?(' <span class="ml-2 text-gray-600 text-base">'+escapeHtml(s.assessment)+'</span>'):'')+'</li>').join('')+'</ul>' : '<div class="text-gray-500">No sources found.</div>';
+              const sup = json?.detailed_analysis?.supporting_evidence || [];
+              const contra = json?.detailed_analysis?.contradictory_evidence || [];
+              const supHtml = sup.length ? '<ul class="space-y-3">'+sup.map(e=>'<li class="text-green-900 text-lg">'+escapeHtml(e)+'</li>').join('')+'</ul>' : '<div class="text-gray-500">No supporting evidence found.</div>';
+              const contraHtml = contra.length ? '<ul class="space-y-3">'+contra.map(e=>'<li class="text-red-900 text-lg">'+escapeHtml(e)+'</li>').join('')+'</ul>' : '<div class="text-gray-500">No contradictory evidence found.</div>';
+              if(root){
+                root.innerHTML = '\n<div class="mb-6">'+supHtml+'<div class="mt-6">'+contraHtml+'</div></div>\n<div>'+sourcesHtml+'</div>';
+              }
+              // stop if we have sources
+              if((sources && sources.length) || (sup && sup.length) || (contra && contra.length)){
+                if(interval){ clearInterval(interval); interval=null; }
+              }
+            }catch(e){/* ignore */}
+          }
+          function escapeHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+          function escapeAttr(s){ return (s||'').replace(/"/g,'%22'); }
+          fetchOnce(); interval = setInterval(fetchOnce,2000);
+          setTimeout(()=>{ if(interval){ clearInterval(interval); interval=null; } },30000);
+        })();
+      `}} />
     </main>
   );
 }
