@@ -1,0 +1,17 @@
+{
+  "title": "ClaimCheck Pro",
+  "tagline": "Aggregates multilingual evidence and quality signals. No truth verdicts.",
+  "input.placeholder": "Paste a URL or text (any language)…",
+  "button.check": "Check evidence",
+  "depth.quick": "Quick",
+  "depth.thorough": "Thorough",
+  "timerange.7d": "7d",
+  "timerange.30d": "30d",
+  "timerange.1y": "1y",
+  "timerange.all": "All",
+  "progress.queue": "Enqueuing analysis…",
+  "progress.extract": "Extracting content…",
+  "progress.discover": "Finding evidence…",
+  "progress.assess": "Assessing sources…",
+  "progress.done": "Complete."
+}

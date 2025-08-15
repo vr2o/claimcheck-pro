@@ -1,0 +1,49 @@
+generator client { provider = "prisma-client-js" }
+datasource db {
+  provider = env("PRISMA_DB_PROVIDER") // "postgresql" in prod, "sqlite" in dev
+  url      = env("DATABASE_URL")
+}
+model Analysis {
+  id             String   @id @default(cuid())
+  userId         String?
+  claimText      String
+  claimLanguage  String
+  originalInput  String
+  context        Json?
+  status         String   @default("queued")
+  qualityScore   Float?
+  diversityIndex Float?
+  consensusData  Json?
+  isPublic       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  sources        EvidenceSource[]
+}
+model EvidenceSource {
+  id               String   @id @default(cuid())
+  analysisId       String
+  url              String
+  title            String?
+  language         String?
+  domain           String
+  sourceType       String
+  discoveredVia    String
+  snippet          String
+  publishDate      DateTime?
+  credibilityScore Float
+  directnessScore  Float
+  methodologyScore Float
+  bias             Json?
+  stance           String
+  qualityScore     Float
+  createdAt        DateTime @default(now())
+  analysis         Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+}
+model CacheEntry {
+  key        String   @id
+  value      Json
+  ttl        DateTime
+  tags       String[]
+  sizeBytes  Int?
+  hitCount   Int      @default(0)
+}
