@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-// ...existing code...
+import { prisma } from '@/lib/db';
+import { extractContent } from '@/lib/extract';
+import { detectLanguage } from '@/lib/lang';
+import { searchAcrossProviders } from '@/lib/search';
+import { scoreAll } from '@/lib/scoring';
+
 // GET handler: return user-friendly analysis JSON by id
 export async function GET(req: NextRequest) {
   try {
@@ -10,12 +15,12 @@ export async function GET(req: NextRequest) {
     // Fetch analysis and sources
     const a = await prisma.analysis.findUnique({
       where: { id },
-      include: { sources: true },
+      include: { sources: true }, // This should be 'sources', not 'evidenceSources'
     });
     if (!a) return jsonErr(404, 'Not found');
 
     // Defensive: fallback if no sources
-    const sourcesWithScores = (a.sources || []).map(s => ({
+    const sourcesWithScores = (a.sources || []).map(s => ({ // This should be 'sources'
       url: s.url,
       title: s.title ?? '',
       language: s.language ?? '',
@@ -31,6 +36,8 @@ export async function GET(req: NextRequest) {
       stance: s.stance ?? '',
       qualityScore: s.qualityScore ?? 0,
     }));
+    // Debug: log sources and stances
+    console.log('[analyze][GET] sourcesWithScores:', sourcesWithScores.map(s => ({ url: s.url, stance: s.stance, snippet: s.snippet })));
 
     // Compose user-friendly veracity analysis JSON (same logic as POST)
     let veracity_score = 50;
@@ -59,10 +66,12 @@ export async function GET(req: NextRequest) {
 
     const context_and_nuance = "This analysis is based on available public sources. Some claims may be difficult to verify due to lack of coverage or conflicting reports. Always consider the context and check multiple sources.";
 
+    // Include stance in sources_checked
     const sources_checked = sourcesWithScores.slice(0, 5).map(s => ({
       name: s.domain || 'Unknown',
       link: s.url,
       assessment: s.snippet || s.title || '',
+      stance: s.stance || 'neutral',
     }));
 
     return NextResponse.json({
@@ -85,13 +94,6 @@ export async function GET(req: NextRequest) {
 }
 
 export const runtime = 'nodejs';
-
-// ...existing code...
-import { prisma } from '@/lib/db';
-import { extractContent } from '@/lib/extract';
-import { detectLanguage } from '@/lib/lang';
-import { searchAcrossProviders } from '@/lib/search';
-import { scoreAll } from '@/lib/scoring';
 
 function jsonErr(status: number, message: string, extra?: any) {
   return NextResponse.json({ error: message, ...(extra ?? {}) }, { status });
@@ -116,7 +118,6 @@ export async function POST(req: NextRequest) {
       },
       select: { id: true },
     });
-
 
     // Extraction (wrapped, never throws)
     let extracted: { title?: string; text?: string; notes?: string[] } = { notes: [] };
@@ -157,6 +158,68 @@ export async function POST(req: NextRequest) {
     });
     console.log('[analyze] Scoring output:', scored);
 
+    // Debug before database operations
+    console.log('[analyze] About to save sources, prisma:', typeof prisma);
+    console.log('[analyze] Sources to save:', scored.sourcesWithScores?.length || 0);
+
+    // Save sources to database with better error handling
+    if (scored.sourcesWithScores && scored.sourcesWithScores.length > 0) {
+      try {
+        const sourcesToSave = scored.sourcesWithScores.map(s => ({
+          analysisId: analysis.id,
+          url: s.url,
+          title: s.title || '',
+          domain: s.domain || '',
+          snippet: s.snippet || '',
+          language: s.language || lang,
+          sourceType: s.sourceType || '',
+          discoveredVia: s.discoveredVia || '',
+          publishDate: s.publishDate ? new Date(s.publishDate) : null,
+          credibilityScore: s.credibilityScore || 0,
+          directnessScore: s.directnessScore || 0,
+          methodologyScore: s.methodologyScore || 0,
+          qualityScore: s.qualityScore || 0,
+          bias: s.bias || '',
+          stance: s.stance || 'neutral',
+        }));
+        
+        // Use evidenceSource (camelCase) for the Prisma client method
+        await prisma.evidenceSource.createMany({
+          data: sourcesToSave,
+          skipDuplicates: true,
+        });
+        console.log('[analyze] Saved', scored.sourcesWithScores.length, 'sources to database');
+      } catch (dbError: any) {
+        console.error('[analyze] Database save error:', dbError);
+        // Don't fail the whole request, just log the error
+      }
+    }
+
+    // Debug: Verify sources were saved
+    try {
+      const savedSourcesCount = await prisma.evidenceSource.count({
+        where: { analysisId: analysis.id }
+      });
+      console.log('[analyze] Verified sources saved:', savedSourcesCount);
+    } catch (verifyError) {
+      console.error('[analyze] Error verifying saved sources:', verifyError);
+    }
+
+    // Update analysis with final scores
+    try {
+      await prisma.analysis.update({
+        where: { id: analysis.id },
+        data: {
+          claimText: claim,
+          claimLanguage: lang,
+          qualityScore: scored.eqs || 0,
+          status: 'completed',
+        },
+      });
+    } catch (updateError: any) {
+      console.error('[analyze] Analysis update error:', updateError);
+    }
+
     // Compose user-friendly veracity analysis JSON
     let veracity_score = 50;
     if (scored.eqs > 75) veracity_score = 90;
@@ -184,10 +247,12 @@ export async function POST(req: NextRequest) {
 
     const context_and_nuance = "This analysis is based on available public sources. Some claims may be difficult to verify due to lack of coverage or conflicting reports. Always consider the context and check multiple sources.";
 
+    // Include stance in sources_checked
     const sources_checked = scored.sourcesWithScores.slice(0, 5).map(s => ({
       name: s.domain || 'Unknown',
       link: s.url,
       assessment: s.snippet || s.title || '',
+      stance: s.stance || 'neutral',
     }));
 
     // Always return the analysis id for routing

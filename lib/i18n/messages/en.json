@@ -14,4 +14,15 @@
   "progress.discover": "Finding evidence…",
   "progress.assess": "Assessing sources…",
   "progress.done": "Complete."
+    ,
+  "whatcanicheck": "What can I check?",
+  "type.link": "Link",
+  "type.claim": "Claim",
+  "type.media": "Media",
+  "media.dragdrop": "Drag and drop an image or video here to analyze",
+  "media.choosefile": "Choose file",
+  "media.ready": "Media file ready to analyze",
+  "media.remove": "Remove file",
+  "clear": "Clear",
+  "header.subtitle": "Your shield against misinformation"
 }

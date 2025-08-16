@@ -1,7 +1,9 @@
 'use client';
 import Link from 'next/link';
+import { useI18n } from '@/lib/i18n/client';
 
 export default function Header() {
+  const { t } = useI18n();
   return (
     <header className="w-full">
       <div className="mx-auto max-w-3xl px-4 pt-14 pb-8 sm:pt-20 sm:pb-10 text-center">
@@ -15,7 +17,7 @@ export default function Header() {
           </span>
         </Link>
         <p className="mt-3 sm:mt-4 text-slate-600 text-base sm:text-lg leading-relaxed">
-          Your shield against misinformation
+          {t('header.subtitle')}
         </p>
       </div>
     </header>

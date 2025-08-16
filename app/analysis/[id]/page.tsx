@@ -1,7 +1,6 @@
-
+'use server';
 import { ResultTypeIcon } from '@/components/ResultHelpers';
 import { AnalysisClientPlaceholder } from '@/components/UiHelpers';
-
 
 function getScoreColor(score: number) {
   if (score >= 75) return 'bg-green-100 text-green-800 border-green-400';
@@ -22,13 +21,12 @@ function Tooltip({ text, children }: { text: string, children: React.ReactNode }
   );
 }
 
-
 async function fetchAnalysis(id: string | undefined) {
   if (!id) return null;
   let baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
   if (!baseUrl) {
     if (process.env.NODE_ENV === 'development') {
-      baseUrl = 'http://localhost:3002';
+      baseUrl = 'http://localhost:3000';
     } else if (process.env.VERCEL_URL) {
       baseUrl = `https://${process.env.VERCEL_URL}`;
     } else if (process.env.HOSTNAME) {
@@ -128,13 +126,37 @@ export default async function AnalysisPage({ params }: { params: { id?: string }
             {data.detailed_analysis.sources_checked.length > 0 ? (
               <ul className="space-y-3">
                 {data.detailed_analysis.sources_checked.map((src: any, i: number) => (
-                  <li key={i} className="text-gray-900 text-lg">
-                    <a href={src.link} target="_blank" rel="noopener noreferrer" className="underline font-medium text-indigo-700 text-lg">{src.name}</a>
-                    {src.assessment && <span className="ml-2 text-gray-600 text-base">{src.assessment}</span>}
+                  <li key={i} className="text-gray-900 text-lg flex items-center gap-2">
+                    <a
+                      href={src.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline font-medium text-indigo-700 text-lg"
+                    >
+                      {src.name}
+                    </a>
+                    {src.assessment && (
+                      <span className="ml-2 text-gray-600 text-base">{src.assessment}</span>
+                    )}
+                    {src.stance && (
+                      <span
+                        className={`ml-2 px-2 py-0.5 rounded text-xs font-semibold ${
+                          src.stance === 'supporting'
+                            ? 'bg-green-100 text-green-800'
+                            : src.stance === 'challenging'
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}
+                      >
+                        {src.stance.charAt(0).toUpperCase() + src.stance.slice(1)}
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
-            ) : <div className="text-gray-500">No sources found.</div>}
+            ) : (
+              <div className="text-gray-500">No sources found.</div>
+            )}
           </div>
         </div>
       </section>
@@ -153,7 +175,7 @@ export default async function AnalysisPage({ params }: { params: { id?: string }
               // replace root content with fresh HTML
               const buildList = (arr)=> arr && arr.length ? '<ul class="space-y-3">'+arr.map((ev)=>'<li class="text-gray-900 text-lg">'+escapeHtml(ev)+'</li>').join('')+'</ul>' : '<div class="text-gray-500">No entries.</div>';
               const sources = json?.detailed_analysis?.sources_checked || [];
-              const sourcesHtml = sources.length ? '<ul class="space-y-3">'+sources.map(s=>'<li class="text-gray-900 text-lg"><a class="underline font-medium text-indigo-700 text-lg" href="'+escapeAttr(s.link)+'" target="_blank">'+escapeHtml(s.name)+'</a>'+(s.assessment?(' <span class="ml-2 text-gray-600 text-base">'+escapeHtml(s.assessment)+'</span>'):'')+'</li>').join('')+'</ul>' : '<div class="text-gray-500">No sources found.</div>';
+              const sourcesHtml = sources.length ? '<ul class="space-y-3">'+sources.map(s=>'<li class="text-gray-900 text-lg flex items-center gap-2"><a class="underline font-medium text-indigo-700 text-lg" href="'+escapeAttr(s.link)+'" target="_blank">'+escapeHtml(s.name)+'</a>'+(s.assessment?(' <span class="ml-2 text-gray-600 text-base">'+escapeHtml(s.assessment)+'</span>'):'')+(s.stance?(' <span class="'+(s.stance==='supporting'?'bg-green-100 text-green-800':s.stance==='challenging'?'bg-red-100 text-red-800':'bg-gray-100 text-gray-800')+' ml-2 px-2 py-0.5 rounded text-xs font-semibold">'+escapeHtml(s.stance.charAt(0).toUpperCase()+s.stance.slice(1))+'</span>'):'')+'</li>').join('')+'</ul>' : '<div class="text-gray-500">No sources found.</div>';
               const sup = json?.detailed_analysis?.supporting_evidence || [];
               const contra = json?.detailed_analysis?.contradictory_evidence || [];
               const supHtml = sup.length ? '<ul class="space-y-3">'+sup.map(e=>'<li class="text-green-900 text-lg">'+escapeHtml(e)+'</li>').join('')+'</ul>' : '<div class="text-gray-500">No supporting evidence found.</div>';
@@ -174,5 +196,5 @@ export default async function AnalysisPage({ params }: { params: { id?: string }
         })();
       `}} />
     </main>
-  );
+      );
 }
